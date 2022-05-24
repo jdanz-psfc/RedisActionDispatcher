@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style> 
+            table, th, td {
+            border:0px solid black;
+            }
+            th {
+                text-align: left;
+            }
+        </style>
+      <meta charset="utf-8" />
+   </head>
+   <body>
+      <hr/>
+      <div id="content"></div>
+      <script>
+         var source = new EventSource('/talk');
+         source.addEventListener('open', function(e) {
+  //           document.getElementById('content').innerHTML += 'Connections to the server established..<br/>';
+         }, false);
+         source.onmessage = function(e) {
+            document.getElementById('Actions').innerHTML = e.data;
+         };
+
+         function doAbort(abortInfo)
+         {
+           //  if(!confirm("Abort Selected Action?"))
+           //     return;
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function() {
+                if (this.readyState == 4 && this.status == 200) {
+                    alert("Selected Action Aborted");
+                }
+            };
+            xhttp.open("GET", "/abort:"+abortInfo, true);
+            xhttp.send();
+         }
+         function buildTables()
+         {
+            const form = document.getElementById('BuildTables');
+            var experiment = form.elements['expname'].value;
+            var shot = form.elements['shot'].value;
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function() {
+                if (this.readyState == 4 && this.status == 200) {
+                    document.getElementById("Phases").innerHTML = this.responseText;
+                }
+            };
+            xhttp.open("GET", "/BuildTables:"+experiment+':'+shot, true);
+            xhttp.send();
+         }
+         function doPhase(phase)
+         {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function() {
+                if (this.readyState == 4 && this.status == 200) {
+                   
+                }
+            };
+            xhttp.open("GET", "/DoPhase:"+phase, true);
+            xhttp.send();
+         }
+        </script>
+        <table id = "Actions"style="width:100%"></table></table>
+        <form id = "BuildTables">
+            <div>
+                <label>Experiment:</label>
+                <input id="expname" type="text">
+                <label>Shot:</label>
+                <input id="shot" type="text">
+                <input id="submit" type="button" onclick = "buildTables()" value = "Build Tables">
+            </div>
+        </form>
+        <div id = "Phases"></div>
+   </body>
+</html>
