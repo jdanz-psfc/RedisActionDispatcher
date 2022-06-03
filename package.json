@@ -1,0 +1,11 @@
+{
+  "name": "RedisActionDispatcher",
+  "version": "1.0.0",
+  "main": "disp_monitor.js",
+  "repository": "git@github.com:MDSplus/RedisActionDispatcher.git",
+  "author": "Gabriele Manduchi <gabriele.manduchi@igi.cnr.it>",
+  "license": "MIT",
+  "dependencies": {
+    "redis": "^4.1.0"
+  }
+}
