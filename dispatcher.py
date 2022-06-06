@@ -261,8 +261,8 @@ class ActionServer:
                     shot = int(cc[2])
                     t = MDSplus.Tree(treeName, shot)
                     self.buildTables(t)
-                except Exception as exc:
-                    traceback.print_exception(exc)
+                except :
+                    traceback.print_exc()
 
 
 # return True if the dispatching confition is satisfied
@@ -378,13 +378,13 @@ class ActionExecutor:
                 try:
                     self.status = int(task.getObject().doMethod(task.getMethod()).data())
                 except Exception as exc:
-                    traceback.print_exception(exc)
+                   # traceback.print_exception(exc)
                     self.status = 0
             else:
                 try:
                     self.status = int(task.data())
                 except Exception as exc:
-                    traceback.print_exception(exc)
+                #    traceback.print_exception(exc)
                     self.status = 0
 
     class StreamedWorker(threading.Thread):
