@@ -242,7 +242,7 @@ class ActionServer:
             if not isinstance(msg['data'], bytes):
                 continue
             message = str(msg['data'], 'utf8')
-            #print('Received Command: '+message)
+            print('Received Command: '+message)
             if message == 'QUIT':
                 return
             if message.startswith('DO_PHASE:'):
