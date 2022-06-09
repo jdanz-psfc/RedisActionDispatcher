@@ -66,4 +66,31 @@ If the above conditions are met, the execution occurs in a detached thread, and 
 ### Web based Dispatch Monitor
 
 A "Proof of Concept" dispatch monitor is provided in order to validate the candidate technology. This dispatch monitor is implemented in node.js and uses the nodejs REDIS interface to access REDIS data and to send commands over REDIS pubsub channels. The node.js application will then implement a Web server exporting dispatching information, using Server Sent Event (SSE) to update the current action status, and triggering the construction of the dispatch tables, the execution of phases and the abort of actions, via AJAX messages sent to the node.js Web server implementaion and then translated by the latter into REDIS memory access or pubsub channel messages. 
-Even if not required by Action Servers, additional information is exported over REDIS memory in order to be displayed by the in the dispatch moinitor web page. 
+Even if not required by Action Servers, additional information is exported over REDIS memory in order to be displayed by the in the dispatch moinitor web page.
+
+### To test
+
+ - clone repo
+ - install redis
+ - cd `RedisActionDispatcher`
+ - define default_tree_path 
+   `export default_tree_path=$PWD`
+ - start monitor
+   `node disp_monitor.js`
+ - browse to monitor - http://localhost:8080/
+ - start dispatcher
+```
+$ python3
+>>> from dispatcher import ActionServer
+>>> act = ActionServer('my_server')
+>>> act.handleCommands()
+```
+ - create a pulse for the 'action' tree
+```
+$ mdstcl 
+TCL> set tree action
+TCL> create pulse 1
+```
+ - click 'Build Tables' 2x 1st time
+ - click 'Init'
+ - watch actions execute
