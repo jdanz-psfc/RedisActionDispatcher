@@ -241,8 +241,9 @@ class ActionServer:
                     break
             if not isinstance(msg['data'], bytes):
                 continue
-            message = str(msg['data'], 'utf8')
-            #print('Received Command: '+message)
+#            message = str(msg['data'], 'utf8')
+            message = msg['data'].decode('utf8')
+            print('Received Command: '+message)
             if message == 'QUIT':
                 return
             if message.startswith('DO_PHASE:'):
@@ -337,7 +338,10 @@ def doPhase(dispatchTable, phase):
         seqNums.append(seqNum)
     seqNums.sort()
     for currSeqNum in seqNums:
-        actionNids = dispatchTable.seqActions[phase][currSeqNum].copy()
+        actionNids = []
+        for action in dispatchTable.seqActions[phase][currSeqNum]:
+            actionNids.append(action)
+#        actionNids = dispatchTable.seqActions[phase][currSeqNum].copy()
         while True:
             currActionNid = pickNotYetDispatched(dispatchTable.experiment, dispatchTable.shot, dispatchTable.ident, actionNids)
             if currActionNid == -1: #all actions in the list dispatched but some not yet finished
@@ -364,7 +368,8 @@ def doPhase(dispatchTable, phase):
 class ActionExecutor:
     class Worker(threading.Thread):
         def __init__(self, tree, node, dispatchTable):
-            super().__init__()
+ #           super().__init__()
+            super(ActionExecutor.Worker, self).__init__()
             self.tree = tree
             self.node = node
             self.dispatchTable = dispatchTable
