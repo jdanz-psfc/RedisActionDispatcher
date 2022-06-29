@@ -1,7 +1,7 @@
 
 const host = 'localhost';
 const port = 8123;
-var expName = 'ACTION';
+var expName = '';
 var shot = 1;
 const ACTION_NOT_DISPATCHED = 0;
 const ACTION_DOING = 1;
@@ -105,10 +105,35 @@ async function buildPhaseButtons()
     console.log(buttonsHtml);
     return buttonsHtml; 
 }
+
+async function clearDispatchInfo(inExpName, inShot)
+{
+    expName = inExpName.toUpperCase();
+    shot = Number.parseInt(inShot);
+    var servers = await getActionServers();
+    for(var i = 0; i < servers.length; i++)
+    {
+        keys = await client.hKeys(expName+':'+shot+':ActionStatus:'+servers[i])
+        for (var j = 0; j < keys.length; j++)
+        {
+            await client.hDel(expName+':'+shot+':ActionStatus:'+servers[i], keys[j]);
+        }
+    }
+    for(var i = 0; i < servers.length; i++)
+    {
+        keys = await client.hKeys(expName+':'+shot+':ActionPathStatus:'+servers[i])
+        for (var j = 0; j < keys.length; j++)
+        {
+            await client.hDel(expName+':'+shot+':ActionPathStatus:'+servers[i], keys[j]);
+        }
+    }
+}
+
 async function buildDispatchTables(inExpName, inShot)
 {
     expName = inExpName.toUpperCase();
     shot = Number.parseInt(inShot);
+    await(clearDispatchInfo(inExpName, inShot));
     var servers = await getActionServers();
     for(var i = 0; i < servers.length; i++)
     {
@@ -126,16 +151,10 @@ async function doPhase(phase)
 }
 
 
-async function buildActionsTable()
+async function buildActionsInfo()
 {
     var servers = await getActionServers();
-    var table = '<table id = "Actions" style="width:100%">\
-    <tr>\
-    <th>Action</th>\
-    <th>Phase</th>\
-    <th>Server</th>\
-    <th>Status</th></tr>'
-
+    var info = '';
     for(var i = 0; i < servers.length; i++)
     {
         key = expName+':'+shot+':ActionPathStatus:'+servers[i];
@@ -148,56 +167,36 @@ async function buildActionsTable()
             path = actKeys[r];
             phase =  await client.hGet(keyPhase, path);
             stat = Number.parseInt(actions[actKeys[r]]);
-            var color;
-            var statname;
-            var targetNid = '';
+            var statname = 'Unknown';
+            var targetNid = 'none';
             switch(stat) {
                 case ACTION_NOT_DISPATCHED:
-                    color = 'Grey';
-                    statname = 'Not Dispatched';
+                     statname = 'Not Dispatched';
                     break;
                 case ACTION_DOING:
-                    color = 'Blue';
                     statname = 'Doing';
                     targetNid = await client.hGet(keyNid, path);
                     break;
                 case ACTION_DONE:
-                    color = 'Green';
                     statname = 'Done';
-                   break;
+                    break;
                 case ACTION_ERROR:
-                    color = 'Red';
                     statname = 'Error';
                     break;;
                 case ACTION_TIMEOUT:
-                    color = 'Red';
                     statname = 'Timeout';
                     break;
                 case ACTION_ABORT:
-                    color = 'Red';
                     statname = 'Aborted';
-                   break;
+                    break;
                 case ACTION_STREAMING:
-                    color = 'Blue';
                     statname = 'Streaming';
                     break;
-                default:
-                    table += '<tr>';
-                
             }
-            if(targetNid == '')
-                table += '<tr style="color:'+color+'">';
-            else
-                table += '<tr style="color:'+color+'" onclick = doAbort("'+targetNid+':'+servers[i]+'")>';
-               
-            if (stat == ACTION_STREAMING)
-                table += '<td><b>'+path+'</b></td><td>'+phase+'</td><td>'+servers[i]+'</td><td><blink>'+statname+'</blink></td></tr>'
-            else
-                table += '<td><b>'+path+'</b></td><td>'+phase+'</td><td>'+servers[i]+'</td><td>'+statname+'</td></tr>'
+            info += path+';'+phase+';'+servers[i]+';'+statname+';'+targetNid +';';
         }        
     }
-    table += '</table>';
-    return table;
+    return info;
 }
 
 async function doAbort(nidStr, server)
@@ -231,11 +230,10 @@ function sendServerSendEvent(req, res) {
 async function writeServerSendEvent(res) {
    // res.write('id: ' + sseId + '\n');
  //  res.write("data: new server event " + data + '\n\n');
-   var table = await buildActionsTable();
+   var actInfo = await buildActionsInfo();
   // if (table != prevTable)
-   {
-        prevTable = table;
-        res.write("data: " + table + '\n\n');
+    {
+        res.write("data: " + actInfo + '\n\n');
     } 
 }
  

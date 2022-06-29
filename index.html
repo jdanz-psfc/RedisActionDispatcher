@@ -20,8 +20,78 @@
   //           document.getElementById('content').innerHTML += 'Connections to the server established..<br/>';
          }, false);
          source.onmessage = function(e) {
-            document.getElementById('Actions').innerHTML = e.data;
+            buildActionsTable(e.data);
+ //           document.getElementById('Actions').innerHTML = e.data;
          };
+
+         //actInfo bring current action status. for each action: <Action path> <phase> <server class> <status> <target nid> separated by blanks
+        var prevActInfo = '';
+        function buildActionsTable(actInfo)
+        {
+            if(actInfo == prevActInfo)
+                return;  //Nothing changed
+            prevActInfo = actInfo;
+            const items = actInfo.split(';');
+            const numRows = (items.length-1) / 5;
+            try{
+            document.getElementById('ActionsTable').remove();
+            }catch(e){}
+            const tbl = document.createElement('table');
+            tbl.setAttribute('id', 'ActionsTable');
+            tbl.setAttribute('style', 'width:100%');
+            const tblBody = document.createElement('tbody');
+            const head = document.createElement('tr');
+            const title1 = document.createElement('th');
+            title1.appendChild(document.createTextNode('Action'));
+            head.appendChild(title1);
+            const title2 = document.createElement('th');
+            title2.appendChild(document.createTextNode('Phase'));
+            head.appendChild(title2);
+            const title3 = document.createElement('th');
+            title3.appendChild(document.createTextNode('Server'));
+            head.appendChild(title3);
+            const title4 = document.createElement('th');
+            title1.appendChild(document.createTextNode('Status'));
+            head.appendChild(title4);
+            tbl.appendChild(head);
+            var itemIdx = 0;
+            for (var i = 0; i < numRows; i++)
+            {
+                const status = items[itemIdx+3];
+                var color;
+                if (status == 'Done')
+                    color = 'green';
+                else if (status == 'Not Dispatched')
+                    color = 'grey';
+                    else if (status == 'Doing')
+                    color = 'blue';
+                else if (status == 'Doing' || status == 'Streaming')
+                    color = 'blue';
+                else
+                    color = 'red';
+                const row = document.createElement('tr');
+                row.setAttribute('style', 'color:'+color);
+                if (items[itemIdx] != 'none')
+                    row.setAttribute('onclick','doAbort("'+items[itemIdx+4]+':'+items[itemIdx+2]+'")');
+                const actPath = document.createElement('td');
+                actPath.appendChild( document.createTextNode(items[itemIdx]));
+                row.appendChild(actPath);
+                const actPhase = document.createElement('td');
+                actPhase.appendChild( document.createTextNode(items[itemIdx+1]));
+                row.appendChild(actPhase);
+                const actServer = document.createElement('td');
+                actServer.appendChild( document.createTextNode(items[itemIdx+2]));
+                row.appendChild(actServer);
+                const actStatus = document.createElement('td');
+                actStatus.appendChild( document.createTextNode(items[itemIdx+3]));
+                row.appendChild(actStatus);
+                tblBody.appendChild(row);
+                itemIdx += 5;
+            }
+            tbl.appendChild(tblBody);
+            document.getElementById('Actions').appendChild(tbl);
+        }
+
 
          function doAbort(abortInfo)
          {
@@ -62,7 +132,9 @@
             xhttp.send();
          }
         </script>
-        <table id = "Actions"style="width:100%"></table></table>
+        <div id = "Actions">
+        <table id = "ActionsTable"style="width:100%"></table></table>
+        </div>
         <form id = "BuildTables">
             <div>
                 <label>Experiment:</label>
