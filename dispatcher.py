@@ -36,9 +36,6 @@ ACTION_ABORT = 5
 ACTION_STREAMING= 6
 
 
-#red = redis.Redis(host='scdevail.rfx.local')
-red = redis.Redis(host='localhost')
-
 
 
 # return the list of Action nids potentially affected by the execution of this actionNode
@@ -381,9 +378,15 @@ class ActionExecutor:
                 self.status = 1
             elif isinstance(task, MDSplus.Method):
                 try:
-                    self.status = int(task.getObject().doMethod(task.getMethod()).data())
+                    self.status = task.getObject().doMethod(task.getMethod())
+                    print('ESEWGUITO METODO')
+                    print(self.status)
+                    if self.status == None:
+                        self.status = 1
+                    else:
+                        self.status = self.status.data()
                 except Exception as exc:
-                   # traceback.print_exception(exc)
+                    traceback.print_exception(exc)
                     self.status = 0
             else:
                 try:
@@ -407,7 +410,9 @@ class ActionExecutor:
         def run(self):
             updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid, self.actionPath, str(ACTION_STREAMING))
             try:
-                status = int(self.device.doMethod(self.actionName+'_init'))
+                status = self.device.doMethod(self.actionName+'_init')
+                if status == None:
+                    status = 1
                 if (status % 2) == 0: 
                     self.dispatchTable.updateMutex.acquire()
                     updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid, self.actionPath, ACTION_ERROR)
@@ -448,7 +453,14 @@ class ActionExecutor:
                         self.dispatchTable.updateMutex.release()
 
                     if 'is_last' in retDict.keys() and retDict['is_last']:
-                        status = int(self.device.doMethod(self.actionName+'_finish')) 
+                        try:
+                            status = self.device.doMethod(self.actionName+'_finish')
+                            if status == None:
+                                status = 1
+                            else:
+                                status = status.data()
+                        except:
+                           status = 0 
                         self.dispatchTable.updateMutex.acquire()
                         if (status % 2) == 0:
                             updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid, self.actionPath, ACTION_ERROR)
@@ -543,24 +555,17 @@ class ActionExecutor:
                     return 0
 
 
-
-
-
-
-
-
-
-
-
-
-def test():
-#    t = MDSplus.Tree('action', -1)
-#    t.createPulse(1)
-#    t = MDSplus.Tree('action', 1)
-#    red.delete('ACTION:1:ActionStatus:my_server')
-    act = ActionServer('my_server')
-#    act.buildTables(t) 
-    act.handleCommands()
+import sys
+if len(sys.argv) != 2 and len(sys.argv) != 3:
+    print('usage: python dispatcher.py <server class> [redis server]')
+    sys.exit(0)
+if len(sys.argv) == 2:
+    red = redis.Redis(host='localhost')
+else:
+    red = redis.Redis(host=sys.argv[2])
+    
+act = ActionServer(sys.argv[1])
+act.handleCommands()
 
 
 
