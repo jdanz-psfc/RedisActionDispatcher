@@ -86,7 +86,7 @@ async function getActionServers()
 
 async function getPhases()
 {
-    console.log("SONO LA GET PHASE");
+    console.log("SONO LA GET PHASE "+ expName + "   " + shot);
     phases = await client.sMembers(expName+':'+shot+':Phases');
     console.log("LETTE FASI");
     return  phases;
@@ -157,11 +157,13 @@ async function buildActionsInfo()
     var info = '';
     for(var i = 0; i < servers.length; i++)
     {
-        key = expName+':'+shot+':ActionPathStatus:'+servers[i];
-        keyNid = expName+':'+shot+':ActionInfo:'+servers[i];
+//        key = expName+':'+shot+':ActionPathStatus:'+servers[i];
+        key = expName+':'+shot+':ActionStatus:'+servers[i];
+ //       keyNid = expName+':'+shot+':ActionInfo:'+servers[i];
         keyPhase = expName+':'+shot+':ActionPhaseInfo:'+servers[i];
         actions = await client.hGetAll(key);
-        actKeys = await client.hKeys(key);
+ //       actKeys = await client.hKeys(key);
+        actKeys = Object.keys(actions);
         for (var r =0; r < actKeys.length; r++)
         {
             path = actKeys[r];
@@ -175,7 +177,8 @@ async function buildActionsInfo()
                     break;
                 case ACTION_DOING:
                     statname = 'Doing';
-                    targetNid = await client.hGet(keyNid, path);
+//                    targetNid = await client.hGet(keyNid, path);
+                    targetNid = path;
                     break;
                 case ACTION_DONE:
                     statname = 'Done';
@@ -202,6 +205,7 @@ async function buildActionsInfo()
 async function doAbort(nidStr, server)
 {
     key = expName+':'+shot+':AbortRequest:'+server;
+    console.log('DO ABORT '+key+'  '+ nidStr);
     await client.hSet(key, nidStr, '1');
 }
 
@@ -230,11 +234,16 @@ function sendServerSendEvent(req, res) {
 async function writeServerSendEvent(res) {
    // res.write('id: ' + sseId + '\n');
  //  res.write("data: new server event " + data + '\n\n');
-   var actInfo = await buildActionsInfo();
-  // if (table != prevTable)
+    try {
+        var actInfo = await buildActionsInfo();
+        // if (table != prevTable)
+            {
+                res.write("data: " + actInfo + '\n\n');
+            } 
+    }catch(error)
     {
-        res.write("data: " + actInfo + '\n\n');
-    } 
+        console.log(error);
+    }
 }
  
 
@@ -253,9 +262,9 @@ async function startWebServer()
             }
         } else {
             if (req.url.substring(0,6) == '/abort') {
-                fields = req.url.split(':');
-                doAbort(fields[1], fields[2]);
-                console.log('ABORT '+ fields[1]+ '  '+ fields[2]);
+                fields = req.url.split(';');
+                doAbort('\\'+fields[1], fields[2]);
+                console.log('ABORT '+ '\\'+fields[1]+ '  '+ fields[2]); //TACCONE
             }
             else if(req.url.substring(0,12) == '/BuildTables')
             {

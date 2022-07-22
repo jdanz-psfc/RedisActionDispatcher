@@ -72,7 +72,9 @@
                 const row = document.createElement('tr');
                 row.setAttribute('style', 'color:'+color);
                 if (items[itemIdx] != 'none')
-                    row.setAttribute('onclick','doAbort("'+items[itemIdx+4]+':'+items[itemIdx+2]+'")');
+                {
+                    row.setAttribute('onclick','doAbort("'+items[itemIdx+4]+';'+items[itemIdx+2]+'")');
+                }
                 const actPath = document.createElement('td');
                 actPath.appendChild( document.createTextNode(items[itemIdx]));
                 row.appendChild(actPath);
@@ -95,15 +97,16 @@
 
          function doAbort(abortInfo)
          {
-           //  if(!confirm("Abort Selected Action?"))
-           //     return;
+            infos = abortInfo.split(';');
+            if(!confirm('Abort Action '+infos[0]+' on server '+infos[1]+'?'))
+                return;
             var xhttp = new XMLHttpRequest();
             xhttp.onreadystatechange = function() {
                 if (this.readyState == 4 && this.status == 200) {
                     alert("Selected Action Aborted");
                 }
             };
-            xhttp.open("GET", "/abort:"+abortInfo, true);
+            xhttp.open("GET", "/abort;"+abortInfo, true);
             xhttp.send();
          }
          function buildTables()

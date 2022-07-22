@@ -6,8 +6,8 @@ import threading
 import traceback
 
     # Shared information on Redis
-    # actionStatus : Dictionary {str(nid): status[:message]} indexed by <experiment>:<shot>:ActionStatus>:<ident>
-    # abortRequest : Dictionary {str(nid): abort req(1/0) } indexed by <experiment>:<shot>:AbortRequest:<ident>
+    # actionStatus : Dictionary {path: status[:message]} indexed by <experiment>:<shot>:ActionStatus>:<ident>
+    # abortRequest : Dictionary {path: abort req(1/0) } indexed by <experiment>:<shot>:AbortRequest:<ident>
     # phaseInfo : Set indexed by <experiment>:<shot>:Phases
     # serverInfo :Dictionary {ident: number of instances}: indexed by ActionServers
 
@@ -36,7 +36,11 @@ ACTION_ABORT = 5
 ACTION_STREAMING= 6
 
 
+def pathToNid(path, t):
+    return t.getNode(path).getNid()
 
+def nidToPath(nid, t):
+    return MDSplus.TreeNode(nid, t).getFullPath()
 
 # return the list of Action nids potentially affected by the execution of this actionNode
 def getDepActionNids(actionNode):
@@ -79,18 +83,18 @@ def getActionServers():
 
 
     # add action as not yet dispatched in redis
-def addActionInShared(experiment, shot, ident, actionNid, actionPath, phase):
-    red.hset(experiment+':'+str(shot)+':ActionStatus:'+ident, str(actionNid), str(ACTION_NOT_DISPATCHED))
+def addActionInShared(experiment, shot, ident, actionNid, actionPath, phase, t):
+    red.hset(experiment+':'+str(shot)+':ActionStatus:'+ident, nidToPath(actionNid, t), str(ACTION_NOT_DISPATCHED))
     red.hset(experiment+':'+str(shot)+':ActionPathStatus:'+ident, actionPath, str(ACTION_NOT_DISPATCHED))
-    red.hset(experiment+':'+str(shot)+':ActionInfo:'+ident, actionPath, str(actionNid))
-    red.hset(experiment+':'+str(shot)+':ActionPhaseInfo:'+ident, actionPath, phase)
-    red.hset(experiment+':'+str(shot)+':AbortRequest:'+ident, str(actionNid), 0)
+    red.hset(experiment+':'+str(shot)+':ActionInfo:'+ident, actionPath, nidToPath(actionNid, t))
+    red.hset(experiment+':'+str(shot)+':ActionPhaseInfo:'+ident, nidToPath(actionNid, t), phase)
+    red.hset(experiment+':'+str(shot)+':AbortRequest:'+ident, nidToPath(actionNid, t), 0)
     red.sadd(experiment+':'+str(shot)+':Phases', phase)
 
 
 
 # get an undispatched action in the list. -1 is returned if non undispatched
-def pickNotYetDispatched(experiment, shot, ident, actionNidList): 
+def pickNotYetDispatched(experiment, shot, ident, actionNidList, t): 
     pending = False
     for actionNid in actionNidList:
         itemid = experiment+':'+str(shot)+':ActionStatus:'+ident
@@ -98,10 +102,10 @@ def pickNotYetDispatched(experiment, shot, ident, actionNidList):
             try:
                 pipe = red.pipeline()
                 pipe.watch(itemid)
-                status = int(pipe.hget(itemid, str(actionNid)))
+                status = int(pipe.hget(itemid, nidToPath(actionNid, t)))
                 if status == ACTION_NOT_DISPATCHED:
                     pipe.multi()
-                    pipe.hset(itemid, str(actionNid), ACTION_DOING)
+                    pipe.hset(itemid, nidToPath(actionNid, t), ACTION_DOING)
                     pipe.execute()
                     pipe.unwatch()
                     return actionNid
@@ -118,15 +122,15 @@ def pickNotYetDispatched(experiment, shot, ident, actionNidList):
     else: 
         return -2 #all dispatched and finished
 
-def updateStatus(experiment, shot, ident, actionNid, actionPath, status):
-    red.hset(experiment+':'+str(shot)+':ActionStatus:'+ident, str(actionNid), str(status))
+def updateStatus(experiment, shot, ident, actionNid, actionPath, status, t):
+    red.hset(experiment+':'+str(shot)+':ActionStatus:'+ident, nidToPath(actionNid, t), str(status))
     red.hset(experiment+':'+str(shot)+':ActionPathStatus:'+ident, actionPath, str(status))
-    red.hset(experiment+':'+str(shot)+':AbortRequest:'+ident, str(actionNid), 0)
+    red.hset(experiment+':'+str(shot)+':AbortRequest:'+ident, nidToPath(actionNid, t), 0)
 
-def checkAbort(experiment, shot, ident, actionNid):
-    abortReq = int(red.hget(experiment+':'+str(shot)+':AbortRequest:'+ident, str(actionNid)))
+def checkAbort(experiment, shot, ident, actionPath, t):
+    abortReq = int(red.hget(experiment+':'+str(shot)+':AbortRequest:'+ident, actionPath))
     if abortReq == 1:
-        abortReq = red.hset(experiment+':'+str(shot)+':AbortRequest:'+ident, str(actionNid), 0)
+        abortReq = red.hset(experiment+':'+str(shot)+':AbortRequest:'+ident, actionPath, 0)
         return True
     return False
 
@@ -196,14 +200,14 @@ class ActionServer:
                             self.actTimeout[d.getNid()] = 0.
                     #update shared action status EXCEPT FOR ACTION UPDATES     
                         if not isinstance(d.getData().getTask(), MDSplus.String):   
-                            updateStatus(self.experiment, self.shot, self.ident, d.getNid(), d.getPath(), ACTION_NOT_DISPATCHED)
+                            updateStatus(self.experiment, self.shot, self.ident, d.getNid(), d.getPath(), ACTION_NOT_DISPATCHED, tree)
 
                         if isinstance(when, MDSplus.Scalar):
                             seqNum = int(when.data())
                             if not seqNum in self.seqActions[phase].keys():
                                 self.seqActions[phase][seqNum] = []
                             self.seqActions[phase][seqNum].append(d.getNid())
-                        addActionInShared(self.experiment, self.shot, self.ident,d.getNid(), d.getPath(), phase)
+                        addActionInShared(self.experiment, self.shot, self.ident,d.getNid(), d.getPath(), phase, self.tree)
                     # record completion event if any
                     completionName = disp.getCompletion().getString()
                     if completionName != '':
@@ -248,9 +252,12 @@ class ActionServer:
                 t = threading.Thread(target=doPhase, args = (self, phase))
                 t.start()
             elif message.startswith('UPDATE:'): #when any action potentially affecting a local action has been updated
-                actionNidStr = message[7:]
+                print(message)
+                items = message[7:].split()
+                actionNidStr = str(pathToNid(items[0], self.tree))
+                origIdent = items[1]
                 newTree = self.tree.copy()
-                t1 = threading.Thread(target=doUpdate, args = (self, actionNidStr, newTree))
+                t1 = threading.Thread(target=doUpdate, args = (self, actionNidStr, newTree, origIdent))
                 t1.start()
             elif message.startswith('BUILD_TABLES:'):
                 try:
@@ -265,17 +272,18 @@ class ActionServer:
 
 # return True if the dispatching confition is satisfied
 
-    def checkDispatch(self, actionNode):
+    def checkDispatch(self, actionNode, inIdent):
         action = actionNode.getData()
         dispatch = action.getDispatch()
         when = dispatch.getWhen()
-        return self.checkDone(when)
+        return self.checkDone(when, inIdent)
 
-    def checkDone(self, when):
+    def checkDone(self, when, inIdent):
         if isinstance(when, MDSplus.TreeNode):
             nid = when.getNid()
-            itemId = self.tree.name+':'+str(self.shot)+':ActionStatus:'+self.ident
-            status = (red.hget(itemId, str(nid))).decode('utf8')
+            itemId = self.tree.name+':'+str(self.shot)+':ActionStatus:'+inIdent
+            print('CHEKING '+itemId + '   '+ nidToPath(nid, self.tree))
+            status = (red.hget(itemId, nidToPath(nid, self.tree))).decode('utf8')
             return status == str(ACTION_DONE)
         if isinstance(when, MDSplus.Compound):
             opcode = when.getOpcode()
@@ -287,19 +295,19 @@ class ActionServer:
                 nid = when.getArgumentAt(1).getNid()
                 updateMsg = when.getArgumentAt(0).data()
                 itemId = self.tree.name+':'+str(self.shot)+':ActionStatus:'+self.ident
-                statuses = str(red.hget(itemId, str(nid)).decode('utf8')).split(':')
+                statuses = str(red.hget(itemId, nidToPath(nid, self.tree)).decode('utf8')).split(':')
                 return len(statuses) == 2 and statuses[0] == str(ACTION_STREAMING) and statuses[1] == updateMsg
         return False
                                 
 
-def doUpdate(dispatchTable, actionNidStr, tree):
+def doUpdate(dispatchTable, actionNidStr, tree, inIdent):
     if actionNidStr in dispatchTable.inDependency.keys():
         affectedNids = dispatchTable.inDependency[actionNidStr]
         toDoNids = []
         actionUpdateNids = []
         for affectedNid in affectedNids:
             affectedNode = MDSplus.TreeNode(affectedNid, tree)
-            if dispatchTable.checkDispatch(affectedNode):
+            if dispatchTable.checkDispatch(affectedNode, inIdent):
 # Action updates are not picked by the shared redis memory, but are always passed to the action executor
 # only the action executor for the action server currently running it will delievr the action update
                 if isinstance(affectedNode.getData().getTask(), MDSplus.String):   
@@ -308,23 +316,24 @@ def doUpdate(dispatchTable, actionNidStr, tree):
                     toDoNids.append(affectedNid)
         if len(toDoNids) + len(actionUpdateNids) > 0:
             while True:
-                currActionNid = pickNotYetDispatched(dispatchTable.experiment, dispatchTable.shot, dispatchTable.ident, toDoNids)
+                currActionNid = pickNotYetDispatched(dispatchTable.experiment, dispatchTable.shot, dispatchTable.ident, toDoNids, tree)
                 if currActionNid < 0:
                     break
                 ########################
                 currActionNode = MDSplus.TreeNode(currActionNid, dispatchTable.tree)
-                dispatchTable.actionExecutor.doAction(dispatchTable.ident, dispatchTable.tree, currActionNode, dispatchTable.actTimeout[currActionNid])
+                dispatchTable.actionExecutor.doAction(dispatchTable.ident, dispatchTable.tree.copy(), currActionNode.copy(), dispatchTable.actTimeout[currActionNid])
                 ###########################
                 dispatchTable.updateMutex.acquire()
                 if currActionNid in dispatchTable.outDependency.keys():
                     for outIdent in dispatchTable.outDependency[currActionNid]:
-                        red.publish('COMMAND:'+dispatchTable.ident, 'UPDATE:'+str(currActionNid))
+                        red.publish('COMMAND:'+str(outIdent), 'UPDATE:'+nidToPath(currActionNid, tree) + ' '+ dispatchTable.ident)
+                        #red.publish('COMMAND:'+dispatchTable.ident, 'UPDATE:'+str(currActionNid))
                 dispatchTable.updateMutex.release()
             # do the same for action updates
             for currActionNid in actionUpdateNids:
                 ########################
                 currActionNode = MDSplus.TreeNode(currActionNid, dispatchTable.tree)
-                dispatchTable.actionExecutor.doAction(dispatchTable.ident, dispatchTable.tree, currActionNode, dispatchTable.actTimeout[currActionNid])
+                dispatchTable.actionExecutor.doAction(dispatchTable.ident, dispatchTable.tree.copy(), currActionNode, dispatchTable.actTimeout[currActionNid])
                 ###########################
                 # action updates DO NOT TRIGGER other actions
                 ###########################
@@ -340,22 +349,23 @@ def doPhase(dispatchTable, phase):
             actionNids.append(action)
 #        actionNids = dispatchTable.seqActions[phase][currSeqNum].copy()
         while True:
-            currActionNid = pickNotYetDispatched(dispatchTable.experiment, dispatchTable.shot, dispatchTable.ident, actionNids)
+            currActionNid = pickNotYetDispatched(dispatchTable.experiment, dispatchTable.shot, dispatchTable.ident, actionNids, dispatchTable.tree)
             if currActionNid == -1: #all actions in the list dispatched but some not yet finished
                 while currActionNid != -2:
                     time.sleep(0.1)
-                    currActionNid = pickNotYetDispatched(dispatchTable.experiment, dispatchTable.shot, dispatchTable.ident, actionNids)
+                    currActionNid = pickNotYetDispatched(dispatchTable.experiment, dispatchTable.shot, dispatchTable.ident, actionNids, dispatchTable.tree)
             if currActionNid == -2:
                 break
-            currActionNode = MDSplus.TreeNode(currActionNid, dispatchTable.tree)
+            currActionNode = MDSplus.TreeNode(currActionNid, dispatchTable.tree.copy())
             actionNids.remove(currActionNid)
             ######################
-            dispatchTable.actionExecutor.doAction(dispatchTable.ident, dispatchTable.tree, currActionNode, dispatchTable.actTimeout[currActionNid])
+            dispatchTable.actionExecutor.doAction(dispatchTable.ident, dispatchTable.tree.copy(), currActionNode, dispatchTable.actTimeout[currActionNid])
             ###########################
             dispatchTable.updateMutex.acquire()
             if currActionNid in dispatchTable.outDependency.keys():
                 for outIdent in dispatchTable.outDependency[currActionNid]:
-                    red.publish('COMMAND:'+dispatchTable.ident, 'UPDATE:'+str(currActionNid))
+                    print('ORA PUBBLICO '+'UPDATE:'+str(currActionNid) +'  A   '+'COMMAND:'+outIdent)
+                    red.publish('COMMAND:'+str(outIdent), 'UPDATE:'+nidToPath(currActionNid, dispatchTable.tree)+' '+dispatchTable.ident)
             dispatchTable.updateMutex.release()
 
 
@@ -372,27 +382,33 @@ class ActionExecutor:
             self.dispatchTable = dispatchTable
 
         def run(self):
+            self.tree = self.tree.copy()
+            self.node = self.node.copy()
             task = self.node.getData().getTask()
             if isinstance(task, MDSplus.Program) or isinstance(task, MDSplus.Procedure or isinstance(task, MDSplus.Routine)):
                 self.tree.copy().tcl('do '+self.path)
                 self.status = 1
             elif isinstance(task, MDSplus.Method):
                 try:
+                    print('Doing '+self.node.getFullPath())
                     self.status = task.getObject().doMethod(task.getMethod())
-                    print('ESEWGUITO METODO')
+                    print('Done '+self.node.getFullPath())
                     print(self.status)
                     if self.status == None:
                         self.status = 1
                     else:
                         self.status = self.status.data()
                 except Exception as exc:
-                    traceback.print_exception(exc)
+                    try:
+                        traceback.print_exc(exc)
+                    except:
+                        pass
                     self.status = 0
             else:
                 try:
                     self.status = int(task.data())
                 except Exception as exc:
-                #    traceback.print_exception(exc)
+                #    traceback.print_exc(exc)
                     self.status = 0
 
     class StreamedWorker(threading.Thread):
@@ -415,7 +431,7 @@ class ActionExecutor:
                     status = 1
                 if (status % 2) == 0: 
                     self.dispatchTable.updateMutex.acquire()
-                    updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid, self.actionPath, ACTION_ERROR)
+                    updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid, self.actionPath, ACTION_ERROR, self.tree)
                     self.dispatchTable.updateMutex.release()
                     return
                 if self.actionNid in self.dispatchTable.completionEvent.keys():
@@ -446,10 +462,10 @@ class ActionExecutor:
                         MDSplus.Event.setevent(completionEvent)
                     if 'update' in retDict.keys():
                         self.dispatchTable.updateMutex.acquire()
-                        updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid,self.actionPath,  str(ACTION_STREAMING)+':'+retDict['update'])
+                        updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid,self.actionPath,  str(ACTION_STREAMING)+':'+retDict['update'], self.tree)
                         if self.actionNid in self.dispatchTable.outDependency.keys():
                             for outIdent in self.dispatchTable.outDependency[self.actionNid]:
-                                red.publish('COMMAND:'+self.dispatchTable.ident, 'UPDATE:'+str(self.actionNid))
+                                red.publish('COMMAND:'+self.dispatchTable.ident, 'UPDATE:'+nidToPath(self.actionNid, self.tree)+' '+dispatchTable.ident)
                         self.dispatchTable.updateMutex.release()
 
                     if 'is_last' in retDict.keys() and retDict['is_last']:
@@ -463,19 +479,19 @@ class ActionExecutor:
                            status = 0 
                         self.dispatchTable.updateMutex.acquire()
                         if (status % 2) == 0:
-                            updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid, self.actionPath, ACTION_ERROR)
+                            updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid, self.actionPath, ACTION_ERROR, self.tree)
                         else:
-                            updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid, self.actionPath, ACTION_DONE)
+                            updateStatus(self.tree.name, self.tree.shot, self.dispatchTable.ident, self.actionNid, self.actionPath, ACTION_DONE, self.tree)
                             if self.actionNid in self.dispatchTable.outDependency.keys():
                                 for outIdent in self.dispatchTable.outDependency[self.actionNid]:
-                                    red.publish('COMMAND:'+self.dispatchTable.ident, 'UPDATE:'+str(self.actionNid))
+                                    red.publish('COMMAND:'+self.dispatchTable.ident, 'UPDATE:'+nidToPath(self.actionNid, self.tree))
                             if completionEvent != '':
                                 MDSplus.Event.setevent(completionEvent)
                         del self.streamedWorkers[int(self.objectNid)]
                         self.dispatchTable.updateMutex.release()
                         return    
             except Exception as exc:
-                traceback.print_exception(exc)
+                traceback.print_exc(exc)
  
 
 
@@ -485,7 +501,7 @@ class ActionExecutor:
         self.streamedWorkers = {}
 
     def isStreamed(self, tree, actionNode):
-        if not isinstance(actionNode.getData().getTask(), MDSplus.Method):
+        if not isinstance(actionNode.copy().getData().getTask(), MDSplus.Method):
             return False
         if actionNode.getExtendedAttribute('is_streamed') == 'yes':
             return True
@@ -501,7 +517,7 @@ class ActionExecutor:
                 targetActNid = (parentAct.getData().getTask().getObject()).getNid()
                 if targetActNid in self.streamedWorkers.keys():
                     self.streamedWorkers[targetActNid].updateAction = node.getData().getTask().data()
-                    updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_DONE)
+                    updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_DONE, tree)
                # else: --Do Not update status if not found singe another instance of this ident may do the stuff
                #     updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_ERROR)
 
@@ -518,7 +534,7 @@ class ActionExecutor:
         self.mutex.acquire()
         worker = self.Worker(tree, node, self.dispatchTable)
         self.dispatchTable.updateMutex.acquire()
-        updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_DOING)
+        updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_DOING, tree)
         self.dispatchTable.updateMutex.release()
         worker.start()
         actionTime = 0.
@@ -528,9 +544,9 @@ class ActionExecutor:
             if not worker.is_alive():
                 self.dispatchTable.updateMutex.acquire()
                 if (worker.status % 2) == 0: 
-                    updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_ERROR)
+                    updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_ERROR, tree)
                 else:
-                    updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_DONE)
+                    updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_DONE, tree)
                     if node.getNid() in self.dispatchTable.completionEvent.keys():
                         MDSplus.Event.setevent(self.dispatchTable.completionEvent[node.getNid()])
                 self.dispatchTable.updateMutex.release()     
@@ -540,16 +556,16 @@ class ActionExecutor:
             if timeout > 0 and actionTime > timeout:
                 print('TIMEOUT')
                 self.dispatchTable.updateMutex.acquire()
-                updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_TIMEOUT)
+                updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_TIMEOUT, tree)
                 self.dispatchTable.updateMutex.release()
                 self.mutex.release()
                 return 0
             if actionTime > abortTime:
                 abortTime = actionTime + 0.5
-                if checkAbort(tree.name, tree.shot, ident, node.getNid()):
+                if checkAbort(tree.name, tree.shot, ident, node.getFullPath(),tree):
                     print('ABORT')
                     self.dispatchTable.updateMutex.acquire()
-                    updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_ABORT)
+                    updateStatus(tree.name, tree.shot, ident, node.getNid(), node.getPath(), ACTION_ABORT, tree)
                     self.dispatchTable.updateMutex.release()
                     self.mutex.release()
                     return 0
