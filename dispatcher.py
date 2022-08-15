@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import MDSplus
 import redis
 import time
