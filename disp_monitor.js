@@ -55,7 +55,7 @@ var sendInterval = 500;
 const http = require('http');
 const fs = require('fs');
 const redis = require('redis');
-const client = redis.createClient({host:'localhost'});
+const client = redis.createClient({host:'marte2'});
 client.on("error", function(err) {console.log("Error: " + err);});
 client.on("connect", function() {console.log("Connected to Redis"); startWebServer();});
 client.connect();
@@ -297,5 +297,5 @@ async function startWebServer()
                 res.end();
             }
         }
-    }).listen(8080);
+    }).listen(8081);
 }
